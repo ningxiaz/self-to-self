@@ -1,0 +1,16 @@
+{
+  "companyName": "TechVoice AI",
+  "productInfo": "Voice-enabled AI assistant",
+  "commonQuestions": [
+    {
+      "question": "What can you do?",
+      "answer": "I can answer questions, provide information, and have natural conversations using voice."
+    },
+    {
+      "question": "How do I use this?",
+      "answer": "Just speak naturally after clicking the Start Conversation button. I'll listen, respond, and then listen again."
+    }
+  ],
+  "tone": "friendly and helpful",
+  "additionalContext": "This is a demo of a voice chat bot using ElevenLabs for text-to-speech and OpenAI for responses."
+}

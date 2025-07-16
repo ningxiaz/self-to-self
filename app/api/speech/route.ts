@@ -10,6 +10,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "ElevenLabs API key is not configured" }, { status: 500 })
     }
 
+    // Check if Voice ID is available
+    if (!process.env.ELEVENLABS_VOICE_ID) {
+      console.error("❌ ElevenLabs Voice ID is missing")
+      return NextResponse.json({ error: "ElevenLabs Voice ID is not configured" }, { status: 500 })
+    }
+
     // Parse request body
     let body
     try {
@@ -28,7 +34,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No text provided" }, { status: 400 })
     }
 
-    const VOICE_ID = "EXAVITQu4vr4xnSDxMaL" // Default female voice
+    const VOICE_ID =  process.env.ELEVENLABS_VOICE_ID // Using my own trained voice
     const API_KEY = process.env.ELEVENLABS_API_KEY
 
     console.log("🎙️ Calling ElevenLabs API with text length:", text.length)
@@ -42,10 +48,11 @@ export async function POST(request: Request) {
         },
         body: JSON.stringify({
           text,
-          model_id: "eleven_monolingual_v1",
+          model_id: "eleven_multilingual_v2",
           voice_settings: {
             stability: 0.5,
-            similarity_boost: 0.5,
+            similarity_boost: 1.0,
+            speed: 1.0,
           },
         }),
       })

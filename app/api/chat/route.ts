@@ -106,7 +106,7 @@ export async function POST(request: Request) {
           // Add the context data as input parameter
           messages: contextData,
           temperature: 0.7,
-          max_tokens: 40,
+          max_tokens: 50,
         }),
       })
 

@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import { getSpeechRecognition } from "./utils/speechRecognition"
 import { Button } from "@/components/ui/button"
 import { DebugPanel } from "./components/debug-panel"
+import Image from "next/image"
 
 export default function VoiceChatBot() {
   const [isListening, setIsListening] = useState(false)
@@ -15,6 +16,7 @@ export default function VoiceChatBot() {
   const [error, setError] = useState<string | null>(null)
   const [retryCount, setRetryCount] = useState(0)
   const [lastSpeechTime, setLastSpeechTime] = useState(0)
+  const [apiKeyError, setApiKeyError] = useState(false)
 
   const recognitionRef = useRef<any>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -234,6 +236,7 @@ export default function VoiceChatBot() {
   // Function to call OpenAI API
   const generateChatResponse = async (message: string) => {
     console.log("🤖 Generating chat response for:", message)
+    setApiKeyError(false)
 
     try {
       console.log("📡 Sending request to /api/chat")
@@ -254,6 +257,18 @@ export default function VoiceChatBot() {
         // Try to parse the error response
         try {
           const errorData = JSON.parse(responseText)
+
+          // Check if this is an API key error
+          if (
+            response.status === 401 ||
+            (errorData.error && (errorData.error.includes("API key") || errorData.error.includes("Authentication")))
+          ) {
+            setApiKeyError(true)
+            throw new Error(
+              `API Key Error: ${errorData.details || errorData.error || "Invalid API key or organization ID"}`,
+            )
+          }
+
           throw new Error(`${response.status} - ${errorData.error || "Unknown error"}`)
         } catch (e) {
           // If we can't parse the JSON, use the raw text
@@ -287,60 +302,11 @@ export default function VoiceChatBot() {
       setRetryCount((prev) => prev + 1)
 
       // Return a fallback response so the conversation can continue
-      return "I'm sorry, I'm having trouble connecting to my brain right now. Could you try again in a moment?"
-    }
-  }
-
-  // Function to call ElevenLabs API
-  const textToSpeech = async (text: string) => {
-    console.log("🔊 Converting text to speech:", text)
-
-    try {
-      console.log("📡 Sending request to /api/speech")
-      const response = await fetch("/api/speech", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ text }),
-      })
-
-      console.log("🔄 Speech API response status:", response.status)
-
-      const responseText = await response.text()
-      console.log("📥 Raw API response length:", responseText.length)
-
-      if (!response.ok) {
-        // Try to parse the error response
-        try {
-          const errorData = JSON.parse(responseText)
-          throw new Error(`${response.status} - ${errorData.error || "Unknown error"}`)
-        } catch (e) {
-          // If we can't parse the raw text
-          throw new Error(`${response.status} - ${responseText.substring(0, 100)}...`)
-        }
+      if (apiKeyError) {
+        return "I'm having trouble with my API key or organization ID. Please check the API configuration in your environment variables."
+      } else {
+        return "I'm sorry, I'm having trouble connecting to my brain right now. Could you try again in a moment?"
       }
-
-      let data
-      try {
-        data = JSON.parse(responseText)
-      } catch (e) {
-        console.error("❌ Failed to parse JSON response:", e)
-        throw new Error(`Invalid JSON response: ${responseText.substring(0, 100)}...`)
-      }
-
-      console.log("✅ Received speech data, audio length:", data.audio ? data.audio.length : "no audio")
-
-      if (!data.audio) {
-        console.error("❌ No audio in response:", data)
-        throw new Error("No audio in response")
-      }
-
-      return data.audio
-    } catch (error) {
-      console.error("❌ Error calling speech API:", error)
-      setError(`Error calling speech API: ${error}`)
-      throw error
     }
   }
 
@@ -457,6 +423,59 @@ export default function VoiceChatBot() {
     }
   }
 
+  // Function to call ElevenLabs API
+  const textToSpeech = async (text: string) => {
+    console.log("🔊 Converting text to speech:", text)
+
+    try {
+      console.log("📡 Sending request to /api/speech")
+      const response = await fetch("/api/speech", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text }),
+      })
+
+      console.log("🔄 Speech API response status:", response.status)
+
+      const responseText = await response.text()
+      console.log("📥 Raw API response length:", responseText.length)
+
+      if (!response.ok) {
+        // Try to parse the error response
+        try {
+          const errorData = JSON.parse(responseText)
+          throw new Error(`${response.status} - ${errorData.error || "Unknown error"}`)
+        } catch (e) {
+          // If we can't parse the raw text
+          throw new Error(`${response.status} - ${responseText.substring(0, 100)}...`)
+        }
+      }
+
+      let data
+      try {
+        data = JSON.parse(responseText)
+      } catch (e) {
+        console.error("❌ Failed to parse JSON response:", e)
+        throw new Error(`Invalid JSON response: ${responseText.substring(0, 100)}...`)
+      }
+
+      console.log("✅ Received speech data, audio length:", data.audio ? data.audio.length : "no audio")
+
+      if (!data.audio) {
+        console.error("❌ No audio in response:", data)
+        throw new Error("No audio in response")
+      }
+
+      return data.audio
+    } catch (error) {
+      console.error("❌ Error calling speech API:", error)
+      setError(`Error calling speech API: ${error}`)
+      throw error
+    }
+  }
+
   const startConversation = () => {
     console.log("🚀 Starting conversation")
     setConversationStarted(true)
@@ -505,82 +524,155 @@ export default function VoiceChatBot() {
     return blob
   }
 
+  if (!conversationStarted) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-purple-900 flex flex-col items-center justify-center p-4">
+        {/* Avatar with glow effect */}
+        <div className="relative mb-8">
+          <div className="absolute inset-0 rounded-full bg-purple-500 blur-3xl opacity-50 scale-110"></div>
+          <div className="relative w-48 h-48 rounded-full overflow-hidden border-4 border-purple-400/30">
+            <Image
+              src="/ningxia-avatar.jpg"
+              alt="Ningxia"
+              width={192}
+              height={192}
+              className="w-full h-full object-cover"
+            />
+          </div>
+        </div>
+
+        {/* Name */}
+        <h1 className="text-4xl font-light text-white mb-12 tracking-wide">Ningxia</h1>
+
+        {/* Start button */}
+        <Button
+          onClick={startConversation}
+          className="bg-transparent border border-white/30 text-white hover:bg-white/10 hover:border-white/50 px-8 py-3 rounded-full text-lg font-light tracking-wide transition-all duration-300"
+        >
+          Start conversation
+        </Button>
+
+        {/* Error messages */}
+        {error && (
+          <div className="mt-8 max-w-md">
+            <div className="bg-red-900/50 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg backdrop-blur-sm">
+              <strong className="font-semibold">Error: </strong>
+              <span>{error}</span>
+            </div>
+          </div>
+        )}
+
+        <DebugPanel />
+      </div>
+    )
+  }
+
   return (
-    <div className="flex flex-col items-center min-h-screen bg-gray-50 p-4">
-      <div className="w-full max-w-md bg-white rounded-xl shadow-lg overflow-hidden">
-        <div className="p-6">
-          <h1 className="text-2xl font-bold text-center mb-6">Voice Chat Bot</h1>
+    <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-purple-900 flex flex-col">
+      {/* Header with avatar and name */}
+      <div className="flex items-center justify-between p-6 border-b border-white/10">
+        <div className="flex items-center space-x-4">
+          <div className="relative">
+            <div className="absolute inset-0 rounded-full bg-purple-500 blur-xl opacity-30"></div>
+            <div className="relative w-12 h-12 rounded-full overflow-hidden border-2 border-purple-400/30">
+              <Image
+                src="/ningxia-avatar.jpg"
+                alt="Ningxia"
+                width={48}
+                height={48}
+                className="w-full h-full object-cover"
+              />
+            </div>
+          </div>
+          <h1 className="text-xl font-light text-white">Ningxia</h1>
+        </div>
 
-          <div className="flex justify-center mb-6">
-            {!conversationStarted ? (
-              <Button
-                onClick={startConversation}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-full"
+        <Button
+          onClick={stopConversation}
+          className="bg-red-900/50 border border-red-500/50 text-red-200 hover:bg-red-900/70 hover:border-red-500/70 px-4 py-2 rounded-full text-sm transition-all duration-300"
+        >
+          End conversation
+        </Button>
+      </div>
+
+      {/* Status indicators */}
+      <div className="px-6 py-4 space-y-2">
+        {isListening && (
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+            <span className="text-blue-400 text-sm">Listening...</span>
+          </div>
+        )}
+
+        {isProcessing && (
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></div>
+            <span className="text-amber-400 text-sm">Processing...</span>
+          </div>
+        )}
+
+        {isSpeaking && (
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+            <span className="text-green-400 text-sm">Speaking...</span>
+          </div>
+        )}
+
+        {transcript && isListening && (
+          <div className="bg-white/5 backdrop-blur-sm border border-white/10 p-3 rounded-lg">
+            <span className="text-white/70 text-sm">{transcript}</span>
+          </div>
+        )}
+
+        {apiKeyError && (
+          <div className="bg-red-900/50 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg backdrop-blur-sm">
+            <strong className="font-semibold">API Key Error: </strong>
+            <span>
+              Your OpenAI API key or organization ID appears to be invalid. Please check your API configuration.
+            </span>
+          </div>
+        )}
+
+        {error && !apiKeyError && (
+          <div className="bg-red-900/50 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg backdrop-blur-sm">
+            <strong className="font-semibold">Error: </strong>
+            <span>{error}</span>
+          </div>
+        )}
+
+        {retryCount > 0 && !apiKeyError && (
+          <div className="bg-yellow-900/50 border border-yellow-500/50 text-yellow-200 px-4 py-3 rounded-lg backdrop-blur-sm">
+            <strong className="font-semibold">Notice: </strong>
+            <span>Having trouble connecting to the AI service. Retry count: {retryCount}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Chat messages */}
+      <div className="flex-1 px-6 pb-6 overflow-y-auto">
+        <div className="space-y-4">
+          {messages.length === 0 && (
+            <div className="text-center text-white/50 mt-32">
+              <p>Start speaking to begin your conversation with Ningxia</p>
+            </div>
+          )}
+
+          {messages.map((msg, index) => (
+            <div key={index} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl ${
+                  msg.role === "user"
+                    ? "bg-purple-600/80 text-white rounded-br-sm"
+                    : "bg-white/10 text-white rounded-bl-sm backdrop-blur-sm border border-white/10"
+                }`}
               >
-                Start Conversation
-              </Button>
-            ) : (
-              <Button
-                onClick={stopConversation}
-                className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-full"
-              >
-                End Conversation
-              </Button>
-            )}
-          </div>
-
-          <div className="flex flex-col space-y-2 mb-4">
-            {isListening && <div className="text-center text-sm text-blue-600 animate-pulse">Listening...</div>}
-
-            {isProcessing && <div className="text-center text-sm text-amber-600">Processing...</div>}
-
-            {isSpeaking && <div className="text-center text-sm text-green-600 animate-pulse">Speaking...</div>}
-
-            {transcript && isListening && <div className="bg-gray-100 p-3 rounded-lg text-sm">{transcript}</div>}
-
-            {error && (
-              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
-                <strong className="font-bold">Error: </strong>
-                <span className="block sm:inline">{error}</span>
+                {msg.content}
               </div>
-            )}
-
-            {retryCount > 0 && (
-              <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded relative">
-                <strong className="font-bold">Notice: </strong>
-                <span className="block sm:inline">
-                  Having trouble connecting to the AI service. Retry count: {retryCount}
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="border rounded-lg h-96 overflow-y-auto p-4 bg-gray-50">
-            {messages.length === 0 && !conversationStarted && (
-              <div className="text-center text-gray-500 mt-32">Press the button to start a voice conversation</div>
-            )}
-
-            {messages.map((msg, index) => (
-              <div key={index} className={`mb-4 ${msg.role === "user" ? "text-right" : "text-left"}`}>
-                <div
-                  className={`inline-block px-4 py-2 rounded-lg ${
-                    msg.role === "user"
-                      ? "bg-blue-600 text-white rounded-br-none"
-                      : "bg-gray-200 text-gray-800 rounded-bl-none"
-                  }`}
-                >
-                  {msg.content}
-                </div>
-              </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="mt-6 text-center text-sm text-gray-500">
-        <p>This voice chat bot uses OpenAI for responses and ElevenLabs for text-to-speech.</p>
-        <p className="mt-1">Speak clearly and wait for a response before continuing.</p>
-      </div>
       <DebugPanel />
     </div>
   )

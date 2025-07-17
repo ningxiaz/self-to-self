@@ -28,3 +28,6 @@ next-env.d.ts
 
 # also my private training files
 /app/context.json
+
+# macOS
+.DS_Store

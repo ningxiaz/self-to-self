@@ -18,7 +18,7 @@ try {
   if (fs.existsSync(contextFilePath)) {
     const contextFileContent = fs.readFileSync(contextFilePath, "utf8")
     contextData = JSON.parse(contextFileContent)
-    console.log("📄 Context data loaded:", contextData)
+    // console.log("📄 Context data loaded:", contextData)
   } else {
     console.warn("⚠️ Context file not found at:", contextFilePath)
   }
@@ -106,7 +106,7 @@ export async function POST(request: Request) {
           // Add the context data as input parameter
           messages: contextData,
           temperature: 0.7,
-          max_tokens: 50,
+          max_tokens: 30,
         }),
       })
 
@@ -125,6 +125,9 @@ export async function POST(request: Request) {
 
       const content = responseData.choices[0]?.message?.content || "Sorry, I couldn't generate a response."
       console.log("📤 Sending response:", content)
+
+      // Saving the response to contextData
+      contextData.push({ role: "assistant", content })
 
       return NextResponse.json({ content })
     } catch (error) {

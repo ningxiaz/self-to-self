@@ -13,6 +13,7 @@ export default function VoiceChatBot() {
   const [transcript, setTranscript] = useState("")
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([])
   const [conversationStarted, setConversationStarted] = useState(false)
+  const [conversationPaused, setConversationPaused] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [retryCount, setRetryCount] = useState(0)
   const [lastSpeechTime, setLastSpeechTime] = useState(0)
@@ -23,13 +24,18 @@ export default function VoiceChatBot() {
   const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const processingRef = useRef<boolean>(false)
   const isListeningRef = useRef<boolean>(false)
+  const conversationPausedRef = useRef<boolean>(false)
   // Keep track of the current transcript in a ref to access in callbacks
   const currentTranscriptRef = useRef<string>("")
 
-  // Update isListeningRef when isListening changes
+  // Update refs when state changes
   useEffect(() => {
     isListeningRef.current = isListening
   }, [isListening])
+
+  useEffect(() => {
+    conversationPausedRef.current = conversationPaused
+  }, [conversationPaused])
 
   // Initialize audio element
   useEffect(() => {
@@ -47,21 +53,25 @@ export default function VoiceChatBot() {
     audioRef.current.onended = () => {
       console.log("⏹️ Audio playback ended")
       setIsSpeaking(false)
-      // Start listening again after speaking is done
-      if (conversationStarted) {
+      // Start listening again after speaking is done (only if not paused)
+      if (conversationStarted && !conversationPausedRef.current) {
         console.log("🔄 Restarting listening after audio ended")
         setTimeout(() => {
           startListening()
         }, 300) // Small delay to ensure everything is reset
+      } else {
+        console.log("⚠️ Not restarting listening - conversation paused or stopped")
       }
     }
 
     audioRef.current.onerror = (e) => {
       console.error("❌ Audio playback error:", e)
       setError(`Audio playback error: ${e}`)
-      // Start listening again after error
-      if (conversationStarted) {
+      // Start listening again after error (only if not paused)
+      if (conversationStarted && !conversationPausedRef.current) {
         setTimeout(startListening, 1000)
+      } else {
+        console.log("⚠️ Not restarting listening after error - conversation paused or stopped")
       }
     }
 
@@ -78,8 +88,8 @@ export default function VoiceChatBot() {
 
   // Silence detection timer
   useEffect(() => {
-    // Only run silence detection when actively listening
-    if (!isListening || isSpeaking || isProcessing) return
+    // Only run silence detection when actively listening and not paused
+    if (!isListening || isSpeaking || isProcessing || conversationPausedRef.current) return
 
     // Check if we have a transcript and if enough time has passed since last speech
     const checkSilence = () => {
@@ -87,14 +97,14 @@ export default function VoiceChatBot() {
       const silenceDuration = now - lastSpeechTime
 
       // If we have a transcript and silence has been detected
-      if (currentTranscriptRef.current.trim() && silenceDuration > 1500 && !processingRef.current) {
+      if (currentTranscriptRef.current.trim() && silenceDuration > 3000 && !processingRef.current) {
         console.log(`🔇 Silence detected for ${silenceDuration}ms, processing speech:`, currentTranscriptRef.current)
         processSpeech(currentTranscriptRef.current)
       }
     }
 
     // Set up interval to check for silence
-    const silenceInterval = setInterval(checkSilence, 500)
+    const silenceInterval = setInterval(checkSilence, 1000)
 
     return () => {
       clearInterval(silenceInterval)
@@ -129,26 +139,25 @@ export default function VoiceChatBot() {
       // Update the last speech time whenever we get a result
       setLastSpeechTime(Date.now())
 
-      // Log the entire results object to see what we're getting
-      console.log(
-        "🎤 Speech recognition results:",
-        JSON.stringify({
-          resultLength: event.results.length,
-          resultIndex: event.resultIndex,
-          isFinal: event.results[event.resultIndex]?.isFinal,
-        }),
-      )
+      // Build the complete transcript from all results
+      let completeTranscript = ""
+      for (let i = 0; i < event.results.length; i++) {
+        completeTranscript += event.results[i][0].transcript
+      }
 
-      // Get the current result
-      const result = event.results[event.resultIndex]
-      const transcriptText = result[0].transcript
+      // Log the speech recognition results
+      // console.log(
+      //   "🎤 Speech recognition results:",
+      //   JSON.stringify({
+      //     resultLength: event.results.length,
+      //     resultIndex: event.resultIndex,
+      //     completeTranscript: completeTranscript,
+      //   }),
+      // )
 
-      // Log whether this result is marked as final
-      console.log(`🎤 Result ${event.resultIndex}: "${transcriptText}" (isFinal: ${result.isFinal})`)
-
-      // Update the transcript state and ref
-      setTranscript(transcriptText)
-      currentTranscriptRef.current = transcriptText
+      // Update the transcript state and ref with the complete accumulated text
+      setTranscript(completeTranscript)
+      currentTranscriptRef.current = completeTranscript
     }
 
     recognitionRef.current.onend = () => {
@@ -156,15 +165,23 @@ export default function VoiceChatBot() {
       console.log("🛑 Speech recognition ended")
       setIsListening(false)
 
-      // Process the current transcript if we have one and haven't processed it yet
+      // Process the current transcript if we have one and haven't processed it yet (only if not paused)
       const currentText = currentTranscriptRef.current.trim()
-      if (currentText && !processingRef.current && conversationStarted && !isSpeaking) {
+      if (
+        currentText &&
+        !processingRef.current &&
+        conversationStarted &&
+        !isSpeaking &&
+        !conversationPausedRef.current
+      ) {
         console.log("📝 Processing transcript after recognition ended:", currentText)
         processSpeech(currentText)
-      } else if (!processingRef.current && conversationStarted && !isSpeaking) {
-        // If we don't have a transcript but recognition ended, restart listening
+      } else if (!processingRef.current && conversationStarted && !isSpeaking && !conversationPausedRef.current) {
+        // If we don't have a transcript but recognition ended, restart listening (only if not paused)
         console.log("🔄 No transcript, restarting listening")
         setTimeout(startListening, 500)
+      } else {
+        console.log("⚠️ Not processing or restarting - conversation paused or other condition met")
       }
     }
 
@@ -172,10 +189,18 @@ export default function VoiceChatBot() {
       console.error("❌ Speech recognition error:", event.error)
       setError(`Speech recognition error: ${event.error}`)
 
-      // Restart listening on non-fatal errors
-      if (event.error !== "aborted" && event.error !== "not-allowed" && conversationStarted && !isSpeaking) {
+      // Restart listening on non-fatal errors (only if not paused)
+      if (
+        event.error !== "aborted" &&
+        event.error !== "not-allowed" &&
+        conversationStarted &&
+        !isSpeaking &&
+        !conversationPausedRef.current
+      ) {
         console.log("🔄 Restarting listening after error")
         setTimeout(startListening, 1000)
+      } else {
+        console.log("⚠️ Not restarting listening after error - conversation paused or fatal error")
       }
     }
 
@@ -183,22 +208,33 @@ export default function VoiceChatBot() {
   }
 
   const startListening = () => {
-    // Don't start listening if we're already listening, speaking, or processing
+    // Don't start listening if we're already listening, speaking, processing, or paused
     if (isListeningRef.current || isSpeaking || isProcessing) {
       console.log("⚠️ Already in an active state, not starting listening")
+      return
+    }
+
+    // Additional check for paused state
+    if (conversationPausedRef.current) {
+      console.log("⚠️ Conversation is paused, not starting listening")
       return
     }
 
     console.log("🎤 Starting listening...")
     setError(null)
 
-    if (!recognitionRef.current && !setupSpeechRecognition()) {
+    // Always setup fresh speech recognition when starting
+    if (!setupSpeechRecognition()) {
       return
     }
 
-    // Clear transcript when starting new listening session
-    setTranscript("")
-    currentTranscriptRef.current = ""
+    // Only clear transcript when starting a completely new conversation turn
+    // Don't clear if we're just restarting recognition
+    if (!currentTranscriptRef.current) {
+      setTranscript("")
+      currentTranscriptRef.current = ""
+    }
+
     processingRef.current = false
 
     // Initialize the last speech time
@@ -211,9 +247,13 @@ export default function VoiceChatBot() {
       console.error("❌ Error starting speech recognition:", error)
       setError(`Error starting speech recognition: ${error}`)
 
-      // Try to restart if there was an error starting
-      if (conversationStarted) {
-        setTimeout(startListening, 1000)
+      // Try to restart if there was an error starting (only if not paused)
+      if (conversationStarted && !conversationPausedRef.current) {
+        setTimeout(() => {
+          // Reset recognition and try again
+          recognitionRef.current = null
+          startListening()
+        }, 1000)
       }
     }
   }
@@ -322,6 +362,10 @@ export default function VoiceChatBot() {
     console.log("🎯 Processing speech:", transcriptText)
     stopListening()
 
+    // Clear the transcript now that we're processing it
+    setTranscript("")
+    currentTranscriptRef.current = ""
+
     // Now call handleSpeechEnd with the transcript
     handleSpeechEnd(transcriptText)
   }
@@ -332,8 +376,8 @@ export default function VoiceChatBot() {
     if (!finalTranscript.trim()) {
       console.log("⚠️ Empty transcript, not processing")
       processingRef.current = false
-      // Restart listening if we're not processing anything
-      if (conversationStarted && !isSpeaking) {
+      // Restart listening if we're not processing anything (only if not paused)
+      if (conversationStarted && !isSpeaking && !conversationPausedRef.current) {
         setTimeout(startListening, 500)
       }
       return
@@ -377,8 +421,8 @@ export default function VoiceChatBot() {
               setError(`Audio play error: ${error}`)
               setIsSpeaking(false)
               processingRef.current = false
-              // Start listening again after error
-              if (conversationStarted) {
+              // Start listening again after error (only if not paused)
+              if (conversationStarted && !conversationPausedRef.current) {
                 setTimeout(startListening, 2000)
               }
             })
@@ -388,8 +432,8 @@ export default function VoiceChatBot() {
           setError(`Audio play error: ${error}`)
           setIsSpeaking(false)
           processingRef.current = false
-          // Start listening again after error
-          if (conversationStarted) {
+          // Start listening again after error (only if not paused)
+          if (conversationStarted && !conversationPausedRef.current) {
             setTimeout(startListening, 2000)
           }
         }
@@ -397,8 +441,8 @@ export default function VoiceChatBot() {
         console.error("❌ Audio element not initialized")
         setError("Audio element not initialized")
         processingRef.current = false
-        // Start listening again after error
-        if (conversationStarted) {
+        // Start listening again after error (only if not paused)
+        if (conversationStarted && !conversationPausedRef.current) {
           setTimeout(startListening, 2000)
         }
       }
@@ -413,8 +457,8 @@ export default function VoiceChatBot() {
         },
       ])
       processingRef.current = false
-      // Start listening again after error
-      if (conversationStarted) {
+      // Start listening again after error (only if not paused)
+      if (conversationStarted && !conversationPausedRef.current) {
         setTimeout(startListening, 2000)
       }
     } finally {
@@ -479,6 +523,7 @@ export default function VoiceChatBot() {
   const startConversation = () => {
     console.log("🚀 Starting conversation")
     setConversationStarted(true)
+    setConversationPaused(false)
     setMessages([])
     setError(null)
     setRetryCount(0)
@@ -486,10 +531,59 @@ export default function VoiceChatBot() {
     startListening()
   }
 
+  const pauseConversation = () => {
+    console.log("⏸️ Pausing conversation")
+    setConversationPaused(true)
+    stopListening()
+
+    // Stop any current audio playback
+    if (audioRef.current) {
+      audioRef.current.pause()
+    }
+    setIsSpeaking(false)
+
+    // Clear transcript and reset states
+    setTranscript("")
+    currentTranscriptRef.current = ""
+    processingRef.current = false
+  }
+
+  const resumeConversation = () => {
+    console.log("▶️ Resuming conversation")
+    setConversationPaused(false)
+    setError(null)
+
+    // Clear any existing recognition instance and restart fresh
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop()
+        recognitionRef.current = null
+      } catch (error) {
+        console.log("🔧 Cleaned up existing recognition instance")
+      }
+    }
+
+    // Reset all states
+    setIsListening(false)
+    setTranscript("")
+    currentTranscriptRef.current = ""
+    processingRef.current = false
+
+    // Force restart listening after a longer delay to ensure everything is reset
+    setTimeout(() => {
+      console.log("🔄 Force restarting listening after resume")
+      if (!isSpeaking && !isProcessing && !conversationPausedRef.current) {
+        setupSpeechRecognition()
+        startListening()
+      }
+    }, 500) // Longer delay to ensure state is properly updated
+  }
+
   const stopConversation = () => {
     console.log("⏹️ Stopping conversation")
     stopListening()
     setConversationStarted(false)
+    setConversationPaused(false)
     processingRef.current = false
 
     if (audioRef.current) {
@@ -587,38 +681,63 @@ export default function VoiceChatBot() {
           <h1 className="text-xl font-light text-white">Ningxia</h1>
         </div>
 
-        <Button
-          onClick={stopConversation}
-          className="bg-red-900/50 border border-red-500/50 text-red-200 hover:bg-red-900/70 hover:border-red-500/70 px-4 py-2 rounded-full text-sm transition-all duration-300"
-        >
-          End conversation
-        </Button>
+        <div className="flex items-center space-x-3">
+          {conversationPaused ? (
+            <Button
+              onClick={resumeConversation}
+              className="bg-green-900/50 border border-green-500/50 text-green-200 hover:bg-green-900/70 hover:border-green-500/70 px-4 py-2 rounded-full text-sm transition-all duration-300"
+            >
+              Resume
+            </Button>
+          ) : (
+            <Button
+              onClick={pauseConversation}
+              className="bg-yellow-900/50 border border-yellow-500/50 text-yellow-200 hover:bg-yellow-900/70 hover:border-yellow-500/70 px-4 py-2 rounded-full text-sm transition-all duration-300"
+            >
+              Pause
+            </Button>
+          )}
+
+          <Button
+            onClick={stopConversation}
+            className="bg-red-900/50 border border-red-500/50 text-red-200 hover:bg-red-900/70 hover:border-red-500/70 px-4 py-2 rounded-full text-sm transition-all duration-300"
+          >
+            End conversation
+          </Button>
+        </div>
       </div>
 
       {/* Status indicators */}
       <div className="px-6 py-4 space-y-2">
-        {isListening && (
+        {conversationPaused && (
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 bg-yellow-400 rounded-full"></div>
+            <span className="text-yellow-400 text-sm">Conversation paused</span>
+          </div>
+        )}
+
+        {!conversationPaused && isListening && (
           <div className="flex items-center space-x-2">
             <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
             <span className="text-blue-400 text-sm">Listening...</span>
           </div>
         )}
 
-        {isProcessing && (
+        {!conversationPaused && isProcessing && (
           <div className="flex items-center space-x-2">
             <div className="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></div>
             <span className="text-amber-400 text-sm">Processing...</span>
           </div>
         )}
 
-        {isSpeaking && (
+        {!conversationPaused && isSpeaking && (
           <div className="flex items-center space-x-2">
             <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
             <span className="text-green-400 text-sm">Speaking...</span>
           </div>
         )}
 
-        {transcript && isListening && (
+        {!conversationPaused && transcript && isListening && (
           <div className="bg-white/5 backdrop-blur-sm border border-white/10 p-3 rounded-lg">
             <span className="text-white/70 text-sm">{transcript}</span>
           </div>
